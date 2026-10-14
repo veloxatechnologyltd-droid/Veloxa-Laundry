@@ -76,4 +76,4 @@ select pg_temp.expect(get_tracking(:'token')->>'code' = 'VX-1001', 'anon can tra
 select pg_temp.expect(get_tracking('wrong-token') is null, 'wrong token returns nothing');
 reset role;
 
-\echo ALL TESTS PASSED
+\echo ALL 0001 TESTS PASSED

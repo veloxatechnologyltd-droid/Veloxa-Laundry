@@ -68,8 +68,7 @@ then the `orders` insert, then `order_items`. Codes come from a per-device block
 in localStorage (`src/lib/codes.ts`); on a code clash (two tabs sharing a
 block) the insert retries with the next code.
 **Why:** Row-by-row client-id inserts are what the offline outbox will replay.
-**Known gap:** if the items insert fails, an order with no items remains.
-Acceptable for now; revisit with the outbox (or a `create_order` RPC).
+**Superseded** by the `create_order` entry below.
 
 ### 2026-10-14: Customer phone is required
 **Decision:** The add-client form requires a valid phone (normalised to E.164
@@ -85,3 +84,29 @@ Not enforced in the DB yet.
 ### 2026-10-14: Local Supabase ports 553xx
 **Why:** Another project on the dev machine runs local Supabase on the default
 543xx ports. Changed in `supabase/config.toml` only; hosted projects are unaffected.
+
+### 2026-10-14: `create_order` RPC; prices decided by the database
+**Decision:** Intake calls `create_order(p_order, p_items)` (migration 0003),
+which inserts the order and its items in one transaction as the caller (RLS
+still applies) and sets each item's `unit_price` from `services`, so the total
+can't be tampered with from the browser. Replaying the same order id is a no-op.
+**Why:** The earlier client-side two-step insert could leave an order with no
+items. One idempotent call is also simpler for the offline outbox to replay.
+**Consequence:** If a price changes while a device is offline, the server price wins.
+
+### 2026-10-14: "Ready" SMS once per order
+**Decision:** The stage trigger queues the ready messages only when `ready_at`
+is null (first time ready). Moving back and forward again no longer re-texts.
+
+### 2026-10-14: Staff invites by email, no invite email yet
+**Decision:** Owners add `invites` (email, role, name). The invitee signs up with
+that email; onboarding lists `my_invites()` and `accept_invite` creates the
+membership. Matching uses the JWT email, which hosted Supabase only issues
+after email confirmation (keep confirmations ON in production).
+**Why:** Works with no email/SMS provider. Sending invite emails can come later.
+
+### 2026-10-14: Pickup reminders via pg_cron
+**Decision:** `queue_due_reminders()` runs every 15 minutes (pg_cron, scheduled
+in migration 0003 where the extension exists). Reminders are queued messages
+like everything else; the Phase 3 sender delivers them. Manual reminders from
+the board count towards `reminder_max`.

@@ -42,7 +42,7 @@ All rows use client-generated UUIDs, so replaying the outbox is idempotent.
 - [x] Local Supabase stack (`npx supabase start`, ports 553xx); migrations apply cleanly
 - [ ] Create hosted Supabase project, `supabase db push` (blocked on user)
 - [x] Scaffold app, port demo UI, auth (email signup → create laundry → owner)
-- [ ] Invite staff (needs invite design: email/phone, role)
+- [x] Invite staff by email + role (`invites`, `my_invites`, `accept_invite`; no invite email sent yet, owner tells them)
 - [x] Replace `store.tsx` localStorage with Supabase data layer (+ realtime refresh, `0002_realtime.sql`)
 
 ### Phase 2: Core operations
@@ -51,11 +51,14 @@ All rows use client-generated UUIDs, so replaying the outbox is idempotent.
 - [x] Clients directory + history; services/prices editable per laundry (Settings)
 - [x] Customer tracking page via secret link (`/t/<token>`; host must rewrite all paths to index.html)
 - [ ] Add the tracking link to the "ready" SMS body (needs a public app URL; keep ≤160 chars)
+- [x] Order + items created atomically via `create_order` RPC (DB prices items, idempotent)
+- [x] "Ready" SMS queued only the first time an order becomes ready
 - [ ] Stop stale stage replays moving an order backwards (see OFFLINE.md "Conflicts")
 
 ### Phase 3: Messaging
 - [ ] `send-messages` Edge Function + SMS provider; delivery status + retries
-- [ ] Auto "ready" SMS; scheduled pickup reminders (configurable delay, max count)
+- [x] Auto "ready" SMS queued by trigger
+- [x] Scheduled pickup reminders: `queue_due_reminders()` via pg_cron every 15 min (org `reminder_after` / `reminder_max`)
 - [ ] Per-org SMS sender ID + usage metering
 - [ ] WhatsApp Cloud API once Meta business verification + templates approved
 

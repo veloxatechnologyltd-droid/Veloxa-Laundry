@@ -6,7 +6,7 @@
 // the "ready" SMS/WhatsApp. The only message the app inserts is a manual
 // pickup reminder.
 //
-// Writes go straight to Supabase for now; Phase 4 puts an IndexedDB outbox in
+// Writes go straight to Supabase for now (orders via the create_order RPC); Phase 4 puts an IndexedDB outbox in
 // front of them (ids are already client-generated so replays are safe).
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "./auth";
@@ -14,7 +14,7 @@ import { supabase, friendlyError, PHOTO_BUCKET } from "./lib/supabase";
 import { takeCode, itemTag } from "./lib/codes";
 import { photoPath } from "./lib/photo";
 import { cedis, firstName, startOfToday } from "./lib/format";
-import { EXPRESS_MULTIPLIER, READY_HOURS } from "./lib/catalog";
+import { READY_HOURS } from "./lib/catalog";
 import {
   balanceOf,
   nextStage,
@@ -221,15 +221,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async ({ customerId, express, items }: { customerId: string; express: boolean; items: DraftItem[] }) => {
       if (items.length === 0) return null;
       const orderId = crypto.randomUUID();
-      const priced = items.map((it) => ({ ...it, id: crypto.randomUUID(), unitPrice: serviceById(it.serviceId)?.price ?? 0 }));
-      const subtotal = priced.reduce((s, it) => s + it.unitPrice * it.qty, 0);
-      const total = express ? Math.round(subtotal * EXPRESS_MULTIPLIER) : subtotal;
+      const withIds = items.map((it) => ({ ...it, id: crypto.randomUUID() }));
       const readyBy = new Date(Date.now() + (express ? READY_HOURS.express : READY_HOURS.standard) * 3600000).toISOString();
 
       try {
         // Photos first, so an item row never points at a missing file.
         const paths: Record<string, string> = {};
-        for (const it of priced) {
+        for (const it of withIds) {
           if (!it.photo) continue;
           const path = photoPath(orgId, orderId, it.id);
           const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, it.photo, { contentType: "image/jpeg" });
@@ -237,56 +235,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           paths[it.id] = path;
         }
 
-        // A code can collide only if two tabs on this device share a block; retry with the next one.
-        let code = "";
+        // Order + items in one transaction (create_order RPC); the DB prices
+        // items from the price list. A code can collide only if two tabs on
+        // this device share a block; retry with the next one.
         for (let attempt = 0; ; attempt++) {
-          code = await takeCode(orgId, reserve);
-          const { error } = await supabase.from("orders").insert({
-            id: orderId,
-            org_id: orgId,
-            customer_id: customerId,
-            code,
-            express,
-            total,
-            ready_by: readyBy,
-            photo_verified: Object.keys(paths).length > 0,
-            created_by: userId,
+          const code = await takeCode(orgId, reserve);
+          const { error } = await supabase.rpc("create_order", {
+            p_order: {
+              id: orderId,
+              org_id: orgId,
+              customer_id: customerId,
+              code,
+              express,
+              ready_by: readyBy,
+              photo_verified: Object.keys(paths).length > 0,
+            },
+            p_items: withIds.map((it, i) => ({
+              id: it.id,
+              tag: itemTag(code, i),
+              type: it.type,
+              color_name: it.colorName,
+              color_hex: it.colorHex.startsWith("#") ? it.colorHex : null,
+              service_id: it.serviceId,
+              qty: it.qty,
+              note: it.note || null,
+              flag: it.flag ?? null,
+              photo_path: paths[it.id] ?? null,
+            })),
           });
           if (!error) break;
           if (error.code !== "23505" || attempt >= 2) throw error;
         }
 
-        const { error: itemsErr } = await supabase.from("order_items").insert(
-          priced.map((it, i) => ({
-            id: it.id,
-            org_id: orgId,
-            order_id: orderId,
-            tag: itemTag(code, i),
-            type: it.type,
-            color_name: it.colorName,
-            color_hex: it.colorHex.startsWith("#") ? it.colorHex : null,
-            service_id: it.serviceId,
-            qty: it.qty,
-            unit_price: it.unitPrice,
-            note: it.note || null,
-            flag: it.flag ?? null,
-            photo_path: paths[it.id] ?? null,
-          }))
-        );
-        if (itemsErr) throw itemsErr;
-
         const { data, error } = await supabase.from("orders").select(ORDER_SELECT).eq("id", orderId).single();
         if (error) throw error;
         const order = sortNested(data as Order);
         setOrders((prev) => [order, ...prev.filter((o) => o.id !== orderId)]);
-        toast({ title: `Order ${code} created`, body: `${items.length} item lines tagged.`, emoji: "🎫", tone: "success" });
+        toast({ title: `Order ${order.code} created`, body: `${items.length} item lines tagged.`, emoji: "🎫", tone: "success" });
         return order;
       } catch (e) {
         fail("Couldn't create order", e);
         return null;
       }
     },
-    [orgId, userId, reserve, serviceById, toast, fail]
+    [orgId, reserve, toast, fail]
   );
 
   const setStage = useCallback(

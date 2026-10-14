@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../auth";
 import { useStore } from "../store";
 import { supabase, friendlyError } from "../lib/supabase";
@@ -214,17 +214,71 @@ function PriceList({ editable }: { editable: boolean }) {
   );
 }
 
+interface Invite {
+  id: string;
+  email: string;
+  role: Role;
+  display_name: string;
+}
+
 function Team() {
-  const { org } = useStore();
+  const { org, role, toast } = useStore();
+  const { session } = useAuth();
+  const isOwner = role === "owner";
   const [team, setTeam] = useState<{ user_id: string; display_name: string; role: Role }[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [inviteRole, setInviteRole] = useState<Role>("staff");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const [m, i] = await Promise.all([
+      supabase.from("memberships").select("user_id, display_name, role").eq("org_id", org.id).order("created_at"),
+      isOwner
+        ? supabase.from("invites").select("id, email, role, display_name").eq("org_id", org.id).is("accepted_at", null).order("created_at")
+        : Promise.resolve({ data: [] }),
+    ]);
+    setTeam((m.data as typeof team) ?? []);
+    setInvites((i.data as Invite[]) ?? []);
+  }, [org.id, isOwner]);
   useEffect(() => {
-    supabase
-      .from("memberships")
-      .select("user_id, display_name, role")
-      .eq("org_id", org.id)
-      .order("created_at")
-      .then(({ data }) => setTeam((data as typeof team) ?? []));
-  }, [org.id]);
+    load();
+  }, [load]);
+
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const invite = async () => {
+    if (!emailOk || !name.trim() || busy) return;
+    setBusy(true);
+    const { error } = await supabase.from("invites").insert({
+      org_id: org.id,
+      email: email.trim().toLowerCase(),
+      role: inviteRole,
+      display_name: name.trim(),
+      invited_by: session?.user.id,
+    });
+    setBusy(false);
+    if (error) {
+      const body = error.code === "23505" ? "That email already has a pending invite." : friendlyError(error);
+      return toast({ title: "Couldn't invite", body, emoji: "⚠️", tone: "error" });
+    }
+    toast({
+      title: `${name.trim()} invited`,
+      body: `Ask them to sign up at ${window.location.origin} with ${email.trim().toLowerCase()}.`,
+      emoji: "✉️",
+      tone: "success",
+    });
+    setEmail("");
+    setName("");
+    load();
+  };
+
+  const cancel = async (id: string) => {
+    const { error } = await supabase.from("invites").delete().eq("id", id);
+    if (error) toast({ title: "Couldn't cancel invite", body: friendlyError(error), emoji: "⚠️", tone: "error" });
+    load();
+  };
 
   return (
     <section className="card rounded-2xl p-5 animate-fade-up">
@@ -236,8 +290,54 @@ function Team() {
             <span className="text-xs capitalize text-ink-soft bg-slate-100 rounded-full px-2 py-0.5">{m.role}</span>
           </div>
         ))}
+        {invites.map((i) => (
+          <div key={i.id} className="flex items-center justify-between text-sm py-1.5 gap-2">
+            <span className="min-w-0">
+              <span className="font-semibold text-ink">{i.display_name}</span>{" "}
+              <span className="text-xs text-slate-400">{i.email}</span>
+            </span>
+            <span className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+                invited · <span className="capitalize">{i.role}</span>
+              </span>
+              <button onClick={() => cancel(i.id)} className="text-xs font-semibold text-slate-400 hover:text-red-500">
+                Cancel
+              </button>
+            </span>
+          </div>
+        ))}
       </div>
-      <p className="text-xs text-slate-400 mt-3">Inviting staff is coming soon.</p>
+
+      {isOwner ? (
+        <div className="mt-4 pt-4 border-t border-dashed">
+          <div className="text-sm font-semibold text-ink">Invite someone</div>
+          <div className="grid sm:grid-cols-[1fr_1fr_auto_auto] gap-2 mt-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Kwesi" className="bg-slate-50 ring-soft rounded-xl px-3 py-2.5 text-sm" />
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && invite()}
+              type="email"
+              placeholder="Their email"
+              className="bg-slate-50 ring-soft rounded-xl px-3 py-2.5 text-sm"
+            />
+            <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as Role)} className="bg-slate-50 ring-soft rounded-xl px-3 py-2.5 text-sm">
+              <option value="staff">Staff</option>
+              <option value="manager">Manager</option>
+              <option value="owner">Owner</option>
+            </select>
+            <button onClick={invite} disabled={!emailOk || !name.trim() || busy} className={`${primaryBtn} py-2.5`}>
+              Invite
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">
+            They sign up with this email and get the option to join {org.name}. Staff take orders and move them along;
+            managers can also edit prices and move orders back.
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400 mt-3">Ask the owner to invite new team members.</p>
+      )}
     </section>
   );
 }

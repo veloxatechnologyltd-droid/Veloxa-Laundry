@@ -37,7 +37,8 @@ customer records, payments, and automatic SMS/WhatsApp messages to customers.
 
 Phases 1–2 built and verified against a **local** Supabase stack: auth +
 onboarding, intake (photos), board, order detail + payments, clients, messages
-log, settings, public tracking page. Hosted Supabase project not created yet
+log, settings (prices, staff invites), public tracking page; pickup reminders
+queued by pg_cron. Hosted Supabase project not created yet
 (needs the user). Next: Phase 3 messaging. See PLAN.md.
 
 ## Rules

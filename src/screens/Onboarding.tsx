@@ -1,6 +1,7 @@
-// First run after signup: create the laundry (org). create_organization makes
-// the caller the owner and seeds a Main branch + default price list.
-import { useState } from "react";
+// First run after signup: join a laundry you were invited to, or create one.
+// create_organization makes the caller the owner and seeds a Main branch +
+// default price list.
+import { useEffect, useState } from "react";
 import { useAuth } from "../auth";
 import { supabase, friendlyError } from "../lib/supabase";
 import { slugify } from "../lib/format";
@@ -14,6 +15,24 @@ export default function Onboarding() {
   const [prefix, setPrefix] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invites, setInvites] = useState<{ id: string; org_name: string; role: string; display_name: string }[]>([]);
+
+  useEffect(() => {
+    supabase.rpc("my_invites").then(({ data }) => setInvites(data ?? []));
+  }, []);
+
+  const join = async (inviteId: string) => {
+    setBusy(true);
+    setError(null);
+    const { data: orgId, error } = await supabase.rpc("accept_invite", { invite: inviteId });
+    if (error) {
+      setError(friendlyError(error));
+      setBusy(false);
+      return;
+    }
+    setActiveOrg(orgId as string);
+    await reloadMemberships();
+  };
 
   const suggested = shop.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "VX";
   const finalPrefix = (prefix || suggested).toUpperCase();
@@ -43,7 +62,31 @@ export default function Onboarding() {
   };
 
   return (
-    <AuthCard title="Set up your laundry" sub="This takes a minute. You can change everything later in Settings.">
+    <AuthCard
+      title={invites.length ? "You've been invited" : "Set up your laundry"}
+      sub={invites.length ? "Join your team below." : "This takes a minute. You can change everything later in Settings."}
+    >
+      {invites.length > 0 && (
+        <div className="space-y-2 mb-6">
+          {invites.map((i) => (
+            <button
+              key={i.id}
+              disabled={busy}
+              onClick={() => join(i.id)}
+              className="w-full flex items-center justify-between rounded-xl bg-teal-50 ring-1 ring-teal-200 px-4 py-3 text-left hover:bg-teal-100 transition disabled:opacity-50"
+            >
+              <span>
+                <span className="block font-semibold text-ink">{i.org_name}</span>
+                <span className="block text-xs text-ink-soft">
+                  as {i.display_name} · <span className="capitalize">{i.role}</span>
+                </span>
+              </span>
+              <span className="text-sm font-bold text-teal-700">Join →</span>
+            </button>
+          ))}
+          <div className="text-xs text-slate-400 text-center pt-2">or set up a new laundry of your own:</div>
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-3">
         <div>
           <label className={labelCls}>Laundry name</label>

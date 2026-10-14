@@ -3,7 +3,9 @@
 Postgres on Supabase. The schema lives in `supabase/migrations/` (applied in
 filename order). `0001_init.sql` is the schema; `0002_realtime.sql` adds
 `orders` and `messages` to the `supabase_realtime` publication (guarded so the
-plain-Postgres test harness still migrates).
+plain-Postgres test harness still migrates). `0003_orders_invites_reminders.sql`
+adds `create_order`, invites, `queue_due_reminders` (+ pg_cron schedule) and makes
+the "ready" messages fire once per order.
 
 ## Tables
 
@@ -19,6 +21,7 @@ plain-Postgres test harness still migrates).
 | `order_events` | Stage timeline | Written **only** by trigger |
 | `payments` | Money received | `amount`, `method` (cash/momo/card/bank); syncs `orders.amount_paid` |
 | `messages` | Outbound SMS/WhatsApp queue and log | `channel`, `kind` (stage/reminder/manual), `status`, `attempts`, `provider_id`, `error` |
+| `invites` | Pending staff invites | `email` (lowercase), `role`, `display_name`, `accepted_at`; one pending invite per (org, email) |
 
 Enums: `member_role`, `order_stage`, `item_flag`, `msg_channel`, `msg_status`,
 `msg_kind`, `pay_method`, `plan_tier`.
@@ -31,6 +34,11 @@ Enums: `member_role`, `order_stage`, `item_flag`, `msg_channel`, `msg_status`,
 | `create_organization(name, slug, owner_name)` | App, after signup | Creates org, makes caller owner, adds Main branch and default services |
 | `reserve_order_codes(org, n)` | App, while online | Reserves `n` order numbers for offline use; returns `prefix, first_number, last_number` |
 | `get_tracking(token)` | Public tracking page (anon) | Returns order summary JSON for one order; no other data is exposed |
+| `create_order(p_order, p_items)` | Intake | Inserts order + items in one transaction as the caller (RLS applies). Unit prices come from `services`; express ×1.5. No-op if the order id exists |
+| `my_invites()` | Onboarding | Pending invites matching the caller's JWT email |
+| `accept_invite(invite)` | Onboarding | Email must match; creates the membership |
+| `queue_due_reminders()` | pg_cron (every 15 min) only | Queues reminder SMS for orders ready longer than `reminder_after`, up to `reminder_max` (manual reminders count). Not executable by app users |
+| `balance_text(total, paid)` | Triggers / reminders | "Fully paid." or "Balance: GHS 12.50." |
 
 ## Triggers
 
@@ -38,7 +46,7 @@ Enums: `member_role`, `order_stage`, `item_flag`, `msg_channel`, `msg_status`,
 |---------|--------|
 | `orders_touch` | Sets `updated_at` |
 | `payments_sync` | Recomputes `orders.amount_paid` from `payments` |
-| `orders_stage` | On insert/stage change: inserts `order_events`. On `ready`: sets `ready_at`, queues SMS (+ WhatsApp, or `skipped` if disabled) unless the customer opted out. On `delivered`: sets `collected_at` |
+| `orders_stage` | On insert/stage change: inserts `order_events`. On the **first** `ready` (ready_at null): sets `ready_at`, queues SMS (+ WhatsApp, or `skipped` if disabled) unless the customer opted out. On `delivered`: sets `collected_at` |
 
 ## Access rules (RLS)
 
@@ -50,6 +58,7 @@ Enums: `member_role`, `order_stage`, `item_flag`, `msg_channel`, `msg_status`,
 | customers, orders, order_items, payments | members | members | owners, managers |
 | order_events | members | trigger only | none |
 | messages | members | members may insert `kind=manual, status=queued` only; status updates via service role | none |
+| invites | owners | owners | owners |
 | storage `item-photos` | members of org in first path segment | same | none yet |
 
 ## Conventions
@@ -79,7 +88,7 @@ Once a real Supabase project exists, also run migrations with the Supabase CLI
 
 ## Known gaps / TODO
 
-- Reminder scheduling job (pg_cron) not written yet (Phase 3).
 - No audit log yet (Phase 6).
 - Storage delete/update policies not defined.
-- Membership invites (by email/phone) not designed yet.
+- Invites are by email only; no invite email is sent, and a user who already
+  belongs to one laundry only sees invites on the onboarding screen (not yet in the app).
