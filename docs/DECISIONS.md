@@ -110,3 +110,29 @@ after email confirmation (keep confirmations ON in production).
 in migration 0003 where the extension exists). Reminders are queued messages
 like everything else; the Phase 3 sender delivers them. Manual reminders from
 the board count towards `reminder_max`.
+
+### 2026-10-14: SMS sender = thin Edge Function over DB functions
+**Decision:** Claiming, retries, opt-out checks and stuck-message recovery are
+SQL (`claim_messages`, `finish_message`, 0004); the Edge Function only moves
+messages between the DB and the provider. Its core (`_shared/sender.ts`,
+`providers.ts`, `sms.ts`) has no Deno imports so vitest covers it, and
+`npm run send:local` runs it from Node against the local stack.
+**Why:** Testable without the edge runtime (not run locally to save memory);
+the DB remains the single source of truth for message state.
+
+### 2026-10-14: No provider configured = nothing is sent
+**Decision:** With `SMS_PROVIDER` unset the function returns early and messages
+stay queued. The `log` provider marks rows sent with `provider_id` `log:…`, which
+the app labels "Test send", so test sends can't be mistaken for delivered SMS.
+**Why:** CLAUDE.md rule 10 (no real SMS without the user) and honest logs.
+
+### 2026-10-14: Arkesel adapter first, unverified
+**Decision:** Implemented Arkesel's v2 send API from its public docs as the
+first real provider. Must be verified with a real account before go-live.
+**Why:** Most common choice for Ghana developers; the provider isn't chosen yet,
+and others are one small adapter each.
+
+### 2026-10-14: Sender is triggered by pg_cron + pg_net, configured via Vault
+**Decision:** `invoke_sender()` runs every minute and POSTs to the function only
+if Vault has `send_messages_url` + `send_messages_secret` and something is
+queued. Going live is setting two Vault secrets, not editing a migration.

@@ -38,7 +38,8 @@ customer records, payments, and automatic SMS/WhatsApp messages to customers.
 Phases 1–2 built and verified against a **local** Supabase stack: auth +
 onboarding, intake (photos), board, order detail + payments, clients, messages
 log, settings (prices, staff invites), public tracking page; pickup reminders
-queued by pg_cron. Hosted Supabase project not created yet
+queued by pg_cron; SMS sender Edge Function (tested with the `log` provider,
+nothing really sent). Hosted Supabase project not created yet
 (needs the user). Next: Phase 3 messaging. See PLAN.md.
 
 ## Rules
@@ -70,6 +71,7 @@ npx supabase@2.120.0 start -x studio,edge-runtime,logflare,vector,supavisor,imgp
 npm run dev                # app on http://localhost:5173 (needs .env.local, see docs/SETUP.md)
 npm test                   # unit tests (vitest)
 npm run build              # typecheck + production build
+npm run send:local         # send queued SMS on the local stack via the log provider (needs SUPABASE_SERVICE_ROLE_KEY)
 supabase/tests/run.sh      # apply migrations to throwaway Postgres + run SQL tests (needs docker, psql)
 ```
 

@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "send:local": "vite-node scripts/send-local.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",

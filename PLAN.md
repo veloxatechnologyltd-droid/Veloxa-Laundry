@@ -56,10 +56,13 @@ All rows use client-generated UUIDs, so replaying the outbox is idempotent.
 - [ ] Stop stale stage replays moving an order backwards (see OFFLINE.md "Conflicts")
 
 ### Phase 3: Messaging
-- [ ] `send-messages` Edge Function + SMS provider; delivery status + retries
+- [x] `send-messages` Edge Function + retries (3 attempts) + stuck-message recovery; every-minute pg_cron call (`0005`)
+- [x] Provider interface: `arkesel` (unverified) + `log` test provider; `npm run send:local`
+- [ ] Go live: SMS account + sender ID, deploy function, set secrets + Vault (docs/MESSAGING.md "Deploying"); needs user
+- [ ] Delivery-report webhook (`delivered` status)
 - [x] Auto "ready" SMS queued by trigger
 - [x] Scheduled pickup reminders: `queue_due_reminders()` via pg_cron every 15 min (org `reminder_after` / `reminder_max`)
-- [ ] Per-org SMS sender ID + usage metering
+- [x] Per-org SMS sender ID + usage metering (`messages.segments`, `sms_usage` view, shown on Messages tab)
 - [ ] WhatsApp Cloud API once Meta business verification + templates approved
 
 ### Phase 4: Offline + devices

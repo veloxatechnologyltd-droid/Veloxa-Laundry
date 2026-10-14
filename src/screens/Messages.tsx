@@ -1,6 +1,7 @@
 // Outbound message log. Messages are queued by the DB (ready trigger) or by
 // staff (manual reminders) and sent by the send-messages Edge Function (Phase 3).
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
 import { useStore } from "../store";
 import { fmtTime, fmtDate, prettyPhone, timeAgo } from "../lib/format";
 import type { Message, MsgStatus } from "../lib/types";
@@ -16,8 +17,21 @@ const STATUS: Record<MsgStatus, { label: string; cls: string }> = {
 };
 
 export default function Messages() {
-  const { messages, customerById, loading } = useStore();
+  const { messages, customerById, loading, org } = useStore();
   const [activeId, setActiveId] = useState<string | undefined>();
+  const [usage, setUsage] = useState<{ messages: number; segments: number } | null>(null);
+
+  useEffect(() => {
+    const month = new Date();
+    month.setDate(1);
+    supabase
+      .from("sms_usage")
+      .select("messages, segments")
+      .eq("org_id", org.id)
+      .eq("month", month.toLocaleDateString("en-CA", { timeZone: "Africa/Accra" }).slice(0, 8) + "01")
+      .maybeSingle()
+      .then(({ data }) => setUsage(data ?? { messages: 0, segments: 0 }));
+  }, [org.id, messages]);
   if (loading) return <Spinner />;
 
   // Hide WhatsApp copies that are skipped because WhatsApp isn't enabled yet.
@@ -39,9 +53,17 @@ export default function Messages() {
         </p>
       </header>
 
+      {usage && (
+        <div className="text-xs text-ink-soft animate-fade-up">
+          SMS sent this month: <span className="font-semibold text-ink">{usage.messages}</span> ({usage.segments} part
+          {usage.segments === 1 ? "" : "s"})
+        </div>
+      )}
+
       {queued > 0 && (
         <div className="rounded-xl bg-amber-50 ring-1 ring-amber-200 px-4 py-3 text-sm text-amber-800 animate-fade-up">
-          {queued} message{queued === 1 ? " is" : "s are"} queued. SMS sending switches on once the SMS provider is connected.
+          {queued} message{queued === 1 ? " is" : "s are"} waiting to send. They normally go out within a minute; if they
+          stay here, SMS sending isn't connected yet.
         </div>
       )}
 
@@ -95,10 +117,17 @@ export default function Messages() {
                       {m.channel === "whatsapp" ? "WhatsApp" : "SMS"}
                     </div>
                     <div className="text-sm text-ink whitespace-pre-wrap">{m.body}</div>
+                    {m.status === "failed" && m.error && <div className="text-[11px] text-red-600 mt-1">⚠️ {m.error}</div>}
                     <div className="flex items-center justify-end gap-2 mt-1">
-                      <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${STATUS[m.status].cls}`} title={m.error ?? undefined}>
-                        {STATUS[m.status].label}
-                      </span>
+                      {m.provider_id?.startsWith("log:") ? (
+                        <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-amber-100 text-amber-700" title="Sent by the test provider; not delivered to the phone">
+                          Test send
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${STATUS[m.status].cls}`} title={m.error ?? undefined}>
+                          {STATUS[m.status].label}
+                        </span>
+                      )}
                       <span className="text-[10px] text-slate-500">
                         {fmtDate(m.created_at)} {fmtTime(m.created_at)}
                       </span>

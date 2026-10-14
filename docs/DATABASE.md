@@ -5,7 +5,10 @@ filename order). `0001_init.sql` is the schema; `0002_realtime.sql` adds
 `orders` and `messages` to the `supabase_realtime` publication (guarded so the
 plain-Postgres test harness still migrates). `0003_orders_invites_reminders.sql`
 adds `create_order`, invites, `queue_due_reminders` (+ pg_cron schedule) and makes
-the "ready" messages fire once per order.
+the "ready" messages fire once per order. `0004_message_sending.sql` adds
+`claim_messages` / `finish_message` (service role only), `messages.claimed_at` /
+`segments`, the `sms_usage` view, and the 07:00–21:00 reminder window.
+`0005_schedule_sender.sql` adds `invoke_sender()` on a 1-minute pg_cron schedule.
 
 ## Tables
 
@@ -37,7 +40,10 @@ Enums: `member_role`, `order_stage`, `item_flag`, `msg_channel`, `msg_status`,
 | `create_order(p_order, p_items)` | Intake | Inserts order + items in one transaction as the caller (RLS applies). Unit prices come from `services`; express ×1.5. No-op if the order id exists |
 | `my_invites()` | Onboarding | Pending invites matching the caller's JWT email |
 | `accept_invite(invite)` | Onboarding | Email must match; creates the membership |
-| `queue_due_reminders()` | pg_cron (every 15 min) only | Queues reminder SMS for orders ready longer than `reminder_after`, up to `reminder_max` (manual reminders count). Not executable by app users |
+| `queue_due_reminders(at default now())` | pg_cron (every 15 min) only | Queues reminder SMS for orders ready longer than `reminder_after`, up to `reminder_max` (manual reminders count). Not executable by app users |
+| `claim_messages(channel, batch)` | send-messages (service role) | Recover stuck rows, skip opted-out, claim a batch as `sending` |
+| `finish_message(id, ok, provider_id, error, segments)` | send-messages (service role) | `sent`, or retry (`queued`) up to 3 attempts, then `failed` |
+| `invoke_sender()` | pg_cron every minute | POSTs to send-messages using Vault secrets; no-op until they exist |
 | `balance_text(total, paid)` | Triggers / reminders | "Fully paid." or "Balance: GHS 12.50." |
 
 ## Triggers

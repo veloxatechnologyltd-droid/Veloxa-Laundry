@@ -58,13 +58,15 @@ select pg_temp.expect((select count(*) from messages m join orders o on o.id = m
 
 -- --- reminders -------------------------------------------------------------------
 reset role;
-update orders set ready_at = now() - interval '25 hours' where code = 'VX-1002';
-select pg_temp.expect(queue_due_reminders() >= 1, 'reminder queued after reminder_after');
+-- Fixed daytime clock so the night-time hold (0004) never makes this flaky.
+select date_trunc('day', now()) + interval '12 hours' as noon \gset
+update orders set ready_at = :'noon'::timestamptz - interval '25 hours' where code = 'VX-1002';
+select pg_temp.expect(queue_due_reminders(:'noon') >= 1, 'reminder queued after reminder_after');
 select pg_temp.expect((select reminders_sent from orders where code = 'VX-1002') = 1, 'reminders_sent counted');
-select pg_temp.expect(queue_due_reminders() = 0, 'no second reminder before another reminder_after');
-update orders set last_reminder_at = now() - interval '25 hours' where code = 'VX-1002';
+select pg_temp.expect(queue_due_reminders(:'noon') = 0, 'no second reminder before another reminder_after');
+update orders set last_reminder_at = :'noon'::timestamptz - interval '25 hours' where code = 'VX-1002';
 update orders set reminders_sent = 3 where code = 'VX-1002';
-select pg_temp.expect(queue_due_reminders() = 0, 'stops at reminder_max');
+select pg_temp.expect(queue_due_reminders(:'noon') = 0, 'stops at reminder_max');
 select pg_temp.expect((select body from messages where kind = 'reminder' limit 1) like 'Kappa 7: Reminder, VX-1002 is ready for pickup. Balance: GHS 73.50.',
   'reminder wording');
 select pg_temp.expect((select length(body) from messages where kind = 'reminder' limit 1) <= 160, 'reminder fits one SMS');

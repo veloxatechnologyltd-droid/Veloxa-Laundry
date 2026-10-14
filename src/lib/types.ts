@@ -143,6 +143,8 @@ export interface Message {
   to_phone: string;
   status: MsgStatus;
   attempts: number;
+  provider_id: string | null;
+  segments: number | null;
   error: string | null;
   created_at: string;
   sent_at: string | null;
